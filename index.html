@@ -794,16 +794,64 @@
             scene.add(model);
             aiTrains.push({ group: model, speed, direction: -1, trackZ });
         }
-
         function updateAITrains(dt) {
-            for (let i = aiTrains.length - 1; i >= 0; i--) {
-                const t = aiTrains[i];
-                t.group.position.x += t.speed / 3.6 * dt * t.direction;
-                if (Math.abs(t.group.position.x - trainPositionX) > 1200) { scene.remove(t.group);
-                    aiTrains.splice(i, 1); }
+    for (let i = aiTrains.length - 1; i >= 0; i--) {
+        const t = aiTrains[i];
+        
+        // ★ AI列车车站停靠逻辑
+        if (t.nextStationIndex < stations.length) {
+            const targetStation = stations[t.nextStationIndex];
+            const distToStation = targetStation.worldX - t.group.position.x;
+            const onPlatform = Math.abs(t.group.position.x - targetStation.worldX) < targetStation.platformHalf;
+            
+            if (distToStation < 2000 && distToStation > 0 && t.stopPhase === 'none') {
+                // 接近车站，开始减速
+                t.targetSpeed = Math.max(30, distToStation * 0.15);
             }
+            
+            if (onPlatform && t.speed < STOP_THRESHOLD) {
+                if (t.stopPhase === 'none') {
+                    t.stopPhase = 'red';
+                    t.stopStartTime = elapsedSimTime;
+                }
+            }
+            
+            if (t.stopPhase === 'red') {
+                t.targetSpeed = 0;
+                if (elapsedSimTime - t.stopStartTime >= RED_DURATION) {
+                    t.stopPhase = 'yellow';
+                }
+            }
+            if (t.stopPhase === 'yellow') {
+                t.targetSpeed = 0;
+                if (elapsedSimTime - t.stopStartTime >= RED_DURATION + YELLOW_DURATION) {
+                    t.stopPhase = 'green';
+                }
+            }
+            if (t.stopPhase === 'green') {
+                t.targetSpeed = 280;
+                if (t.speed > DEPART_THRESHOLD) {
+                    t.nextStationIndex++;
+                    t.stopPhase = 'none';
+                }
+            }
+            
+            // 平滑速度过渡
+            const speedDiff = t.targetSpeed - t.speed;
+            t.speed += Math.abs(speedDiff) < 15 * dt ? speedDiff : Math.sign(speedDiff) * 15 * dt;
         }
-
+        
+        // 移动AI列车
+        t.group.position.x += t.speed / 3.6 * dt * t.direction;
+        
+        // 如果AI列车落后太多，重新定位到玩家前方
+        if (trainPositionX - t.group.position.x > 3000) {
+            t.group.position.x = trainPositionX + 2000;
+            t.speed = 280;
+            t.stopPhase = 'none';
+        }
+    }
+}
         function createChair() {
             const group = new THREE.Group();
             const sw = 0.55,
