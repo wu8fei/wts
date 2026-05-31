@@ -740,7 +740,7 @@
             blueStrip2.position.set(0.5, 0.35, -0.95);
             group.add(blueStrip2);
             for (let i = 0; i < 18; i++) {
-                const carBody = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.1, 1.7), bodyMat);
+                const carBody = new THREE.Mesh(new THREE.BoxGeometry(14, 1.1, 1.7), bodyMat);
                 carBody.position.set(-(i + 1) * 4.5, 0.58, 0);
                 carBody.castShadow = true;
                 carBody.receiveShadow = true;
