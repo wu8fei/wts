@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>wu8的中国火车模拟器（WCTS）</title>
+    <style>
+        :root {
+            --bg: #0a0a0f;
+            --lever-track-w: clamp(30px, 3.8vw, 42px);
+            --lever-handle-w: clamp(38px, 5vw, 54px);
+            --lever-handle-h: clamp(34px, 5.5vh, 56px);
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: var(--bg);
+            overflow: hidden;
+            font-family: 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+            cursor: grab;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            height: 100vh;
+            width: 100vw;
+            touch-action: none;
+        }
+        body.grabbing {
+            cursor: grabbing;
+        }
+        #canvas-container {
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+        }
+        canvas {
+            display: block;
+        }
+        .lever-container {
+            position: fixed;
+            z-index: 30;
+            pointer-events: auto;
+            touch-action: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            bottom: 20%;
+            top: 6%;
+            width: var(--lever-track-w);
+        }
+        #throttle-container { left: clamp(16px, 5vw, 40px); }
+        #brake-container { right: clamp(16px, 5vw, 40px); }
+        .lever-track {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            background: #3a3a3f;
+            border-radius: calc(var(--lever-track-w) / 2);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5), 0 2px 12px rgba(0, 0, 0, 0.4);
+            overflow: hidden;
+            cursor: pointer;
+        }
+        .lever-fill {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            border-radius: 0 0 calc(var(--lever-track-w) / 2 - 2px) calc(var(--lever-track-w) / 2 - 2px);
+            transition: height 0.04s linear, background 0.2s ease;
+            pointer-events: none;
+        }
+        #throttle-fill { background: linear-gradient(to top, #e07800, #ff9a30); box-shadow: 0 0 18px rgba(255, 140, 30, 0.45); }
+        #brake-fill { background: linear-gradient(to top, #1a5faa, #4499dd); box-shadow: 0 0 18px rgba(60, 140, 220, 0.45); }
+        .lever-handle {
+            position: absolute;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: var(--lever-handle-w);
+            height: var(--lever-handle-h);
+            border-radius: 10px;
+            cursor: grab;
+            pointer-events: auto;
+            touch-action: none;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 8px rgba(0, 0, 0, 0.3);
+            transition: background 0.18s ease, box-shadow 0.18s ease;
+            z-index: 2;
+        }
+        .lever-handle:active { cursor: grabbing; }
+        #throttle-handle { background: #888; }
+        #throttle-handle.active { background: #ff8c1a; box-shadow: 0 4px 22px rgba(255, 140, 30, 0.6), 0 0 14px rgba(255, 120, 20, 0.35); border-color: rgba(255, 200, 120, 0.5); }
+        #brake-handle { background: #888; }
+        #brake-handle.active { background: #3388cc; box-shadow: 0 4px 22px rgba(50, 130, 210, 0.6), 0 0 14px rgba(40, 110, 190, 0.35); border-color: rgba(140, 190, 240, 0.5); }
+        .lever-label {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            pointer-events: none;
+            font-size: clamp(0.6em, 1.1vw, 0.78em);
+            font-weight: 700;
+            letter-spacing: 2px;
+            color: #ccc;
+            text-shadow: 0 0 8px rgba(0, 0, 0, 0.7);
+            white-space: nowrap;
+        }
+        #throttle-label { top: -26px; color: #ffb870; }
+        #brake-label { top: -26px; color: #80c0f0; }
+        #gauge-wrapper {
+            position: fixed;
+            z-index: 21;
+            pointer-events: none;
+            bottom: 19%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 260px;
+            height: 135px;
+            background: rgba(8, 8, 14, 0.6);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-radius: 130px 130px 16px 16px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 6px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            overflow: hidden;
+        }
+        #gauge-canvas { display: block; width: 260px; height: 135px; }
+        #hud {
+            position: fixed;
+            z-index: 20;
+            pointer-events: none;
+            bottom: 7%;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 50px;
+            align-items: flex-end;
+            background: rgba(8, 8, 12, 0.55);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            border-radius: 28px;
+            padding: 16px 38px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.13);
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        }
+        .hud-item { text-align: center; color: #fafafa; text-shadow: 0 0 20px rgba(255, 255, 255, 0.3); min-width: 70px; }
+        .hud-value {
+            font-size: 3.2em;
+            font-weight: 700;
+            letter-spacing: 2px;
+            line-height: 1;
+            font-variant-numeric: tabular-nums;
+            font-family: 'SF Mono', 'Consolas', 'Monaco', 'PingFang SC', monospace;
+            color: #ffffff;
+            text-shadow: 0 0 28px rgba(180, 210, 255, 0.6), 0 2px 4px rgba(0, 0, 0, 0.4);
+        }
+        .hud-label { font-size: 0.7em; letter-spacing: 3px; text-transform: uppercase; color: #c8cce0; margin-top: 2px; font-weight: 500; }
+        .hud-unit { font-size: 0.5em; font-weight: 400; color: #999; letter-spacing: 1px; }
+        #score-display { color: #ffd966; text-shadow: 0 0 20px rgba(255, 220, 80, 0.7); }
+        #info-tip {
+            position: fixed;
+            z-index: 20;
+            top: 28px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #e8e8f0;
+            font-size: 0.9em;
+            letter-spacing: 1px;
+            pointer-events: none;
+            text-shadow: 0 0 12px rgba(0, 0, 0, 0.8);
+            transition: opacity 0.8s ease, color 0.3s;
+            background: rgba(10, 10, 16, 0.6);
+            padding: 8px 24px;
+            border-radius: 24px;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            white-space: nowrap;
+            text-align: center;
+        }
+        #info-tip.station-near { color: #ffd966; border-color: rgba(255, 200, 50, 0.4); background: rgba(20, 15, 5, 0.7); }
+        #info-tip.skip-allowed { color: #80ff80; border-color: rgba(100, 255, 100, 0.5); background: rgba(5, 20, 5, 0.7); }
+        #info-tip.must-stop { color: #ff9966; border-color: rgba(255, 140, 80, 0.5); background: rgba(20, 10, 5, 0.7); }
+        #speed-limit-display {
+            position: fixed;
+            z-index: 20;
+            top: 72px;
+            left: 50%;
+            transform: translateX(-50%);
+            pointer-events: none;
+            font-size: 0.85em;
+            font-weight: 600;
+            letter-spacing: 1px;
+            color: #ffaa33;
+            background: rgba(10, 10, 16, 0.65);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 6px 22px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 170, 50, 0.35);
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+            text-shadow: 0 0 10px rgba(0, 0, 0, 0.6);
+            white-space: nowrap;
+            transition: color 0.3s, border-color 0.3s;
+        }
+        #speed-limit-display.overspeed { color: #ff6666; border-color: rgba(255, 80, 80, 0.7); }
+        #speed-limit-display.timeout-warning { color: #ff4444; border-color: rgba(255, 60, 60, 0.8); animation: blink 0.5s ease-in-out infinite; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        #speed-indicator {
+            position: fixed;
+            z-index: 18;
+            pointer-events: none;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            transition: all 0.5s ease;
+            opacity: 0;
+        }
+        #speed-indicator.warning { border-color: rgba(255, 140, 40, 0.7); opacity: 0.75; box-shadow: 0 0 40px rgba(255, 120, 30, 0.3); }
+        #speed-indicator.danger { border-color: rgba(255, 50, 50, 0.8); opacity: 0.9; box-shadow: 0 0 50px rgba(255, 30, 30, 0.4); animation: pulse-danger 0.7s ease-in-out infinite; }
+        @keyframes pulse-danger { 0%, 100% { box-shadow: 0 0 40px rgba(255, 30, 30, 0.35); } 50% { box-shadow: 0 0 70px rgba(255, 50, 50, 0.65); } }
+        @media (max-width: 768px) {
+            .hud-value { font-size: 2.2em; }
+            #hud { gap: 20px; bottom: 10%; padding: 10px 22px 8px; border-radius: 22px; }
+            #info-tip { font-size: 0.75em; padding: 5px 14px; top: 16px; }
+            #speed-limit-display { top: 54px; font-size: 0.7em; padding: 4px 16px; }
+            #speed-indicator { width: 80px; height: 80px; }
+            #gauge-wrapper { bottom: 22%; width: 190px; height: 100px; border-radius: 95px 95px 12px 12px; }
+            #gauge-canvas { width: 190px; height: 100px; }
+            .lever-container { bottom: 24%; top: 8%; }
+            #throttle-container { left: clamp(8px, 3vw, 20px); }
+            #brake-container { right: clamp(8px, 3vw, 20px); }
+            .lever-label { font-size: 0.6em; top: -20px; }
+        }
+        @media (max-width: 480px) {
+            .lever-container { bottom: 26%; top: 10%; }
+            #throttle-container { left: 6px; }
+            #brake-container { right: 6px; }
+            .lever-label { font-size: 0.5em; letter-spacing: 1px; top: -16px; }
+            #hud { gap: 12px; bottom: 11%; padding: 8px 14px 6px; }
+            .hud-value { font-size: 1.7em; }
+            #gauge-wrapper { bottom: 25%; width: 150px; height: 80px; border-radius: 75px 75px 10px 10px; }
+            #gauge-canvas { width: 150px; height: 80px; }
+            #info-tip { font-size: 0.7em; top: 14px; padding: 4px 10px; }
+            #speed-limit-display { top: 48px; font-size: 0.65em; padding: 3px 12px; }
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="speed-indicator"></div>
+    <div class="lever-container" id="throttle-container">
+        <span class="lever-label" id="throttle-label">加速</span>
+        <div class="lever-track" id="throttle-track">
+            <div class="lever-fill" id="throttle-fill" style="height:0%;"></div>
+            <div class="lever-handle" id="throttle-handle" style="top:100%;"></div>
+        </div>
+    </div>
+    <div class="lever-container" id="brake-container">
+        <span class="lever-label" id="brake-label">刹车</span>
+        <div class="lever-track" id="brake-track">
+            <div class="lever-fill" id="brake-fill" style="height:0%;"></div>
+            <div class="lever-handle" id="brake-handle" style="top:100%;"></div>
+        </div>
+    </div>
+    <div id="gauge-wrapper"><canvas id="gauge-canvas" width="520" height="270"></canvas></div>
+    <div id="hud">
+        <div class="hud-item"><div class="hud-value" id="speed-display">300</div><div class="hud-label">速度 <span class="hud-unit">km/h</span></div></div>
+        <div class="hud-item"><div class="hud-value" id="distance-display">0.0</div><div class="hud-label">里程 <span class="hud-unit">km</span></div></div>
+        <div class="hud-item"><div class="hud-value" id="score-display">0</div><div class="hud-label">积分</div></div>
+    </div>
+    <div id="info-tip">📍 下一站：汗脚站 10000m</div>
+    <div id="speed-limit-display">⏱ 限速：-- km/h</div>
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        const CHUNK_SIZE = 200, OVERLAP = 0.8, BEHIND_CHUNKS = 2, AHEAD_CHUNKS = 6;
+        const TRACK_Z_UP = 0, TRACK_Z_DOWN = 7.6;
+        const RAIL_OFFSET_Z = 0.72;
+        const GROUND_Y = -0.35, BALLAST_Y = 0.05, RAIL_TOP_Y = 0.28;
+        const TERRAIN_HALF_WIDTH = 170, TRACK_CLEARANCE = 6.5, BUILDING_CLEARANCE = 14;
+        const STATION_NAMES = ['汗脚站', '麻脚站', '雨姐站', '带派站', '杭州站'];
+        const PLATFORM_HALF_LENGTH = 280, PLATFORM_Z_OFFSET = 3.8;
+        const FIRST_STATION_DISTANCE = 10000, STATION_SPACING = 50000;
+        const STOP_THRESHOLD = 0.5, DEPART_THRESHOLD = 3;
+        const STOP_COOLDOWN_DIST = 15;
+        const RED_DURATION = 39, YELLOW_DURATION = 1;
+        const TERRAIN_TYPES = ['grassland', 'desert', 'snow'];
+        const TERRAIN_RANDOM_OFFSET = Math.floor(Math.random() * 3);
+        function getTerrainType(worldX) { const seg = Math.floor(worldX / 10000) + TERRAIN_RANDOM_OFFSET; return TERRAIN_TYPES[seg % 3]; }
+        const container = document.getElementById('canvas-container');
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.5));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.15;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        container.appendChild(renderer.domElement);
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color('#b0c8e8');
+        scene.fog = new THREE.Fog('#c0d4f0', 200, 800);
+        const camera = new THREE.PerspectiveCamera(66, window.innerWidth / window.innerHeight, 0.3, 1400);
+        camera.position.set(0, 2.95, TRACK_Z_UP);
+        camera.lookAt(30, 2.6, TRACK_Z_UP);
+        let cameraYaw = 0, cameraPitch = -0.05;
+        const defaultYaw = 0, defaultPitch = -0.05;
+        const maxYaw = Math.PI * 0.38, maxPitch = 0.28, minPitch = -0.38;
+        const ambientLight = new THREE.AmbientLight('#c0d8f8', 1.7); scene.add(ambientLight);
+        const hemisphereLight = new THREE.HemisphereLight('#8db8e8', '#7a9e60', 1.0); scene.add(hemisphereLight);
+        const sunLight = new THREE.DirectionalLight('#fffef5', 5.0);
+        sunLight.position.set(160, 85, 55);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048; sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 0.5; sunLight.shadow.camera.far = 550;
+        sunLight.shadow.camera.left = -130; sunLight.shadow.camera.right = 130;
+        sunLight.shadow.camera.top = 85; sunLight.shadow.camera.bottom = -85;
+        sunLight.shadow.bias = -0.00025; sunLight.shadow.normalBias = 0.025;
+        scene.add(sunLight); scene.add(sunLight.target);
+        const matCache = {}; const getMat = (key, fn) => { if (!matCache[key]) matCache[key] = fn(); return matCache[key]; };
+        const mGroundGrass = () => getMat('groundGrass', () => new THREE.MeshStandardMaterial({ color: '#5c8e3e', roughness: 0.82, metalness: 0.02 }));
+        const mBallast = () => getMat('ballast', () => new THREE.MeshStandardMaterial({ color: '#c8c3ba', roughness: 0.68, metalness: 0.04 }));
+        const mRail = () => getMat('rail', () => new THREE.MeshStandardMaterial({ color: '#525156', roughness: 0.3, metalness: 0.88 }));
+        const mSleeper = () => getMat('sleeper', () => new THREE.MeshStandardMaterial({ color: '#5e5242', roughness: 0.72, metalness: 0.04 }));
+        const mTrunk = () => getMat('trunk', () => new THREE.MeshStandardMaterial({ color: '#7d5d3c', roughness: 0.78, metalness: 0.02 }));
+        const mLeavesA = () => getMat('leavesA', () => new THREE.MeshStandardMaterial({ color: '#4d7d32', roughness: 0.68, metalness: 0.01 }));
+        const mLeavesB = () => getMat('leavesB', () => new THREE.MeshStandardMaterial({ color: '#3f6b2a', roughness: 0.7, metalness: 0.01 }));
+        const mLeavesC = () => getMat('leavesC', () => new THREE.MeshStandardMaterial({ color: '#5c9040', roughness: 0.66, metalness: 0.01 }));
+        const mWallA = () => getMat('wallA', () => new THREE.MeshStandardMaterial({ color: '#f6f1e9', roughness: 0.58, metalness: 0.03 }));
+        const mWallB = () => getMat('wallB', () => new THREE.MeshStandardMaterial({ color: '#eae3d7', roughness: 0.6, metalness: 0.03 }));
+        const mRoofA = () => getMat('roofA', () => new THREE.MeshStandardMaterial({ color: '#8d3c2c', roughness: 0.52, metalness: 0.06 }));
+        const mRoofB = () => getMat('roofB', () => new THREE.MeshStandardMaterial({ color: '#5c5242', roughness: 0.55, metalness: 0.08 }));
+        const mHillGrassA = () => getMat('hillGrassA', () => new THREE.MeshStandardMaterial({ color: '#6ea048', roughness: 0.72, metalness: 0.02 }));
+        const mHillGrassB = () => getMat('hillGrassB', () => new THREE.MeshStandardMaterial({ color: '#9e8d70', roughness: 0.68, metalness: 0.03 }));
+        const mHillGrassC = () => getMat('hillGrassC', () => new THREE.MeshStandardMaterial({ color: '#5e7c3a', roughness: 0.76, metalness: 0.02 }));
+        const mGroundDesert = () => getMat('groundDesert', () => new THREE.MeshStandardMaterial({ color: '#F6F165', roughness: 0.78, metalness: 0.04 }));
+        const mHillDesertA = () => getMat('hillDesertA', () => new THREE.MeshStandardMaterial({ color: '#e8e35a', roughness: 0.7, metalness: 0.05 }));
+        const mHillDesertB = () => getMat('hillDesertB', () => new THREE.MeshStandardMaterial({ color: '#dcd650', roughness: 0.65, metalness: 0.06 }));
+        const mHillDesertC = () => getMat('hillDesertC', () => new THREE.MeshStandardMaterial({ color: '#f0ed70', roughness: 0.72, metalness: 0.04 }));
+        const mWallDesert = () => getMat('wallDesert', () => new THREE.MeshStandardMaterial({ color: '#F6F165', roughness: 0.65, metalness: 0.05 }));
+        const mRoofDesert = () => getMat('roofDesert', () => new THREE.MeshStandardMaterial({ color: '#c4b840', roughness: 0.6, metalness: 0.08 }));
+        const mCactus = () => getMat('cactus', () => new THREE.MeshStandardMaterial({ color: '#4a6a2a', roughness: 0.55, metalness: 0.02 }));
+        const mBushDesert = () => getMat('bushDesert', () => new THREE.MeshStandardMaterial({ color: '#e8e35a', roughness: 0.7, metalness: 0.03 }));
+        const mGroundSnow = () => getMat('groundSnow', () => new THREE.MeshStandardMaterial({ color: '#e8e8f0', roughness: 0.7, metalness: 0.01 }));
+        const mHillSnowA = () => getMat('hillSnowA', () => new THREE.MeshStandardMaterial({ color: '#e0e0e8', roughness: 0.68, metalness: 0.02 }));
+        const mHillSnowB = () => getMat('hillSnowB', () => new THREE.MeshStandardMaterial({ color: '#d8d8e2', roughness: 0.66, metalness: 0.03 }));
+        const mHillSnowC = () => getMat('hillSnowC', () => new THREE.MeshStandardMaterial({ color: '#ececf4', roughness: 0.7, metalness: 0.02 }));
+        const mTrunkSnow = () => getMat('trunkSnow', () => new THREE.MeshStandardMaterial({ color: '#4a3a2a', roughness: 0.75, metalness: 0.02 }));
+        const mLeavesSnowA = () => getMat('leavesSnowA', () => new THREE.MeshStandardMaterial({ color: '#e8e8f2', roughness: 0.6, metalness: 0.01 }));
+        const mLeavesSnowB = () => getMat('leavesSnowB', () => new THREE.MeshStandardMaterial({ color: '#dcdce8', roughness: 0.62, metalness: 0.01 }));
+        const mLeavesSnowC = () => getMat('leavesSnowC', () => new THREE.MeshStandardMaterial({ color: '#f0f0f6', roughness: 0.58, metalness: 0.01 }));
+        const mWallSnow = () => getMat('wallSnow', () => new THREE.MeshStandardMaterial({ color: '#5c4033', roughness: 0.6, metalness: 0.05 }));
+        const mRoofSnow = () => getMat('roofSnow', () => new THREE.MeshStandardMaterial({ color: '#e8e8f0', roughness: 0.5, metalness: 0.04 }));
+        const mBushSnow = () => getMat('bushSnow', () => new THREE.MeshStandardMaterial({ color: '#d8d8e4', roughness: 0.68, metalness: 0.02 }));
+        const mPlatform = () => getMat('platform', () => new THREE.MeshStandardMaterial({ color: '#c0bab0', roughness: 0.65, metalness: 0.05 }));
+        const mStationWall = () => getMat('stationWall', () => new THREE.MeshStandardMaterial({ color: '#e8e0d0', roughness: 0.55, metalness: 0.04 }));
+        const mStationRoof = () => getMat('stationRoof', () => new THREE.MeshStandardMaterial({ color: '#7a4030', roughness: 0.5, metalness: 0.06 }));
+        const mChair = () => getMat('chair', () => new THREE.MeshStandardMaterial({ color: '#8b7355', roughness: 0.7, metalness: 0.1 }));
+        const mSignalPole = () => getMat('signalPole', () => new THREE.MeshStandardMaterial({ color: '#555555', roughness: 0.5, metalness: 0.5 }));
+        const mCityBuilding = () => getMat('cityBuilding', () => new THREE.MeshStandardMaterial({ color: '#8899aa', roughness: 0.3, metalness: 0.5 }));
+        const mCityWindowLit = () => getMat('cityWindowLit', () => new THREE.MeshStandardMaterial({ color: '#ffeebb', roughness: 0.2, metalness: 0.1, emissive: '#ffeecc', emissiveIntensity: 0.4 }));
+        const mCityWindowDark = () => getMat('cityWindowDark', () => new THREE.MeshStandardMaterial({ color: '#334455', roughness: 0.3, metalness: 0.2 }));
+        const geoCache = {}; const getGeo = (key, fn) => { if (!geoCache[key]) geoCache[key] = fn(); return geoCache[key]; };
+        const railLen = CHUNK_SIZE + OVERLAP;
+        const getRailGeo = () => getGeo('rail', () => new THREE.BoxGeometry(railLen, 0.13, 0.06));
+        const getBallastGeo = () => getGeo('ballast', () => new THREE.BoxGeometry(railLen + 0.3, 0.22, 3.9));
+        const getSlabGeo = () => getGeo('slab', () => new THREE.BoxGeometry(railLen, 0.06, 2.3));
+        const getSleeperGeo = () => getGeo('sleeper', () => new THREE.BoxGeometry(0.14, 0.06, 2.65));
+        const getConeGeo = () => getGeo('cone', () => new THREE.ConeGeometry(2.4, 5.8, 10, 3));
+        const getConeSmallGeo = () => getGeo('coneSmall', () => new THREE.ConeGeometry(1.6, 4.0, 8, 3));
+        const getSphereGeo = () => getGeo('sphereLeaf', () => new THREE.SphereGeometry(1.9, 10, 6));
+        const getSphereSmallGeo = () => getGeo('sphereSmall', () => new THREE.SphereGeometry(1.3, 8, 5));
+        const sr = (seed) => { const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453123; return x - Math.floor(x); };
+        const srr = (seed, min, max) => min + sr(seed) * (max - min);
+        const sri = (seed, min, max) => Math.floor(srr(seed, min, max + 1));
+        const stations = [];
+        function generateStations(count = 30) {
+            const pool = [...STATION_NAMES]; let lastX = FIRST_STATION_DISTANCE; let lastName = '';
+            for (let i = 0; i < count; i++) { let name; do { name = pool[Math.floor(Math.random() * pool.length)]; } while (name === lastName && pool.length > 1); lastName = name;
+                stations.push({ worldX: lastX, name, platformHalf: PLATFORM_HALF_LENGTH, visited: false, allowSkip: Math.random() < 0.2, signalGroup: null, signalRed: null, signalYellow: null, signalGreen: null, stopPhase: 'none', stopStartTime: 0, hasAwarded: false });
+                lastX += STATION_SPACING; }
+        }
+        generateStations();
+        let nextStationIndex = 0, score = 0, lastStopX = null, stopCooldownActive = false;
+        function getCurrentTargetStation() { return nextStationIndex < stations.length ? stations[nextStationIndex] : null; }
+        function isOnPlatform(trainX) { const s = getCurrentTargetStation(); return s ? Math.abs(trainX - s.worldX) < s.platformHalf : false; }
+        const weatherStates = { sunny: { bg: '#b0c8e8', fog: '#c0d4f0', fogNear: 200, fogFar: 800, ambient: '#c0d8f8', ambientIntensity: 1.7, sunColor: '#fffef5', sunIntensity: 5.0 }, cloudy: { bg: '#8a9bb0', fog: '#a0aab8', fogNear: 150, fogFar: 550, ambient: '#a0b0c0', ambientIntensity: 1.2, sunColor: '#d0d5e0', sunIntensity: 2.5 }, rainy: { bg: '#4a5568', fog: '#5a6578', fogNear: 100, fogFar: 400, ambient: '#606878', ambientIntensity: 0.9, sunColor: '#8090a0', sunIntensity: 1.5 }, night: { bg: '#1a1a2e', fog: '#1a1a2e', fogNear: 80, fogFar: 350, ambient: '#2a2a40', ambientIntensity: 0.6, sunColor: '#304060', sunIntensity: 0.5 } };
+        let currentWeather = 'sunny'; const rainParticles = new THREE.Group(); scene.add(rainParticles);
+        function setWeather(weather) { const w = weatherStates[weather]; scene.background = new THREE.Color(w.bg); scene.fog = new THREE.Fog(w.fog, w.fogNear, w.fogFar); ambientLight.color.set(w.ambient); ambientLight.intensity = w.ambientIntensity; sunLight.color.set(w.sunColor); sunLight.intensity = w.sunIntensity; while (rainParticles.children.length > 0) rainParticles.remove(rainParticles.children[0]); if (weather === 'rainy') { const rainGeo = new THREE.BufferGeometry(); const rainCount = 800; const positions = new Float32Array(rainCount * 3); for (let i = 0; i < rainCount; i++) { positions[i * 3] = (Math.random() - 0.5) * 300; positions[i * 3 + 1] = Math.random() * 60 + 10; positions[i * 3 + 2] = (Math.random() - 0.5) * 200; } rainGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3)); const rainMat = new THREE.PointsMaterial({ color: '#aaccff', size: 0.25, transparent: true, opacity: 0.4 }); rainParticles.add(new THREE.Points(rainGeo, rainMat)); } currentWeather = weather; }
+        let gameTime = 0; const SIM_DAY = 1440; let lastAutoMinute = -1;
+        function updateAutoWeather() { if (isPaused) return; const currentMinute = Math.floor(gameTime / 60); if (currentMinute === lastAutoMinute) return; lastAutoMinute = currentMinute; const dayProgress = gameTime % SIM_DAY; if (dayProgress < 720) { const w = Math.random() > 0.5 ? 'sunny' : 'rainy'; setWeather(w); } else if (dayProgress < 960) { setWeather('cloudy'); } else { setWeather('night'); } }
+        let aiTrain = null; let aiTargetSpeed = 300;
+        function createAITrainModel() {
+            const group = new THREE.Group(); const bodyMat = new THREE.MeshStandardMaterial({ color: '#f5f5f5', roughness: 0.35, metalness: 0.6 }); const blueLineMat = new THREE.MeshStandardMaterial({ color: '#3a6fb5', roughness: 0.5, metalness: 0.5, emissive: '#000810', emissiveIntensity: 0.1 }); const wheelGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.1, 16); const wheelMat = new THREE.MeshStandardMaterial({ color: '#222222', roughness: 0.4, metalness: 0.8 });
+            const headBody = new THREE.Mesh(new THREE.BoxGeometry(2.8, 1.25, 1.9), bodyMat); headBody.position.set(0, 0.65, 0); headBody.castShadow = true; headBody.receiveShadow = true; group.add(headBody);
+            for (let x = -1.0; x <= 1.0; x += 2.0) { for (let z = -0.8; z <= 0.8; z += 1.6) { const wheel = new THREE.Mesh(wheelGeo, wheelMat); wheel.rotation.x = Math.PI / 2; wheel.position.set(x, -0.25, z); wheel.castShadow = true; wheel.receiveShadow = true; headBody.add(wheel); } }
+            const wedgeShape = new THREE.Shape(); wedgeShape.moveTo(0, 0); wedgeShape.lineTo(0, 1.0); wedgeShape.lineTo(1.2, 0.3); wedgeShape.lineTo(1.2, 0); wedgeShape.closePath(); const wedgeGeo = new THREE.ExtrudeGeometry(wedgeShape, { depth: 1.6, bevelEnabled: false }); const wedge = new THREE.Mesh(wedgeGeo, bodyMat); wedge.position.set(1.4, -0.02, -0.8); wedge.castShadow = true; wedge.receiveShadow = true; group.add(wedge);
+            const blueStrip = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.05, 0.12), blueLineMat); blueStrip.position.set(0.5, 0.35, 0.95); group.add(blueStrip); const blueStrip2 = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.05, 0.12), blueLineMat); blueStrip2.position.set(0.5, 0.35, -0.95); group.add(blueStrip2);
+            for (let i = 0; i < 12; i++) { const carBody = new THREE.Mesh(new THREE.BoxGeometry(4.2, 1.1, 1.7), bodyMat); carBody.position.set(-(i + 1) * 4.5, 0.58, 0); carBody.castShadow = true; carBody.receiveShadow = true; group.add(carBody); for (let x = -1.5; x <= 1.5; x += 3.0) { for (let z = -0.75; z <= 0.75; z += 1.5) { const wheel = new THREE.Mesh(wheelGeo, wheelMat); wheel.rotation.x = Math.PI / 2; wheel.position.set(x, -0.25, z); wheel.castShadow = true; wheel.receiveShadow = true; carBody.add(wheel); } } const line1 = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.04, 0.1), blueLineMat); line1.position.set(-(i + 1) * 4.5, 0.28, 0.85); group.add(line1); const line2 = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.04, 0.1), blueLineMat); line2.position.set(-(i + 1) * 4.5, 0.28, -0.85); group.add(line2); }
+            group.scale.set(3, 3, 3); return group;
+        }
+        function spawnAITrain() { if (aiTrain) return; const model = createAITrainModel(); model.position.set(trainPositionX - 120, 0, TRACK_Z_DOWN); model.rotation.y = Math.PI; scene.add(model); aiTrain = { group: model, speed: 300, position: trainPositionX - 120, stopped: false, stopTimer: 0, targetStationIndex: -1 }; }
+
+        function updateAITrain(dt) {
+            if (!aiTrain || isPaused) return;
+            const t = aiTrain;
+            let targetStation = null;
+            for (let i = 0; i < stations.length; i++) {
+                if (stations[i].worldX > t.position && !stations[i].allowSkip) { targetStation = stations[i]; break; }
+            }
+            if (targetStation) {
+                const distToStation = targetStation.worldX - t.position;
+                const onPlatform = Math.abs(t.position - targetStation.worldX) < PLATFORM_HALF_LENGTH;
+                // 精准停靠：距离站台中心小于300米时开始线性减速到0
+                if (!t.stopped) {
+                    if (distToStation < 500) {
+                        aiTargetSpeed = Math.max(0, distToStation * 0.5);
+                    } else if (distToStation < 2000) {
+                        aiTargetSpeed = Math.max(50, distToStation * 0.12);
+                    } else {
+                        aiTargetSpeed = 300;
+                    }
+                    const diff = aiTargetSpeed - t.speed;
+                    const acc = 12;
+                    t.speed += Math.abs(diff) < acc * dt ? diff : Math.sign(diff) * acc * dt;
+                    t.speed = Math.max(0, Math.min(350, t.speed));
+                    if (onPlatform && t.speed < STOP_THRESHOLD) {
+                        t.speed = 0;
+                        t.stopped = true;
+                        t.stopTimer = 0;
+                    }
+                } else {
+                    t.speed = 0;
+                    t.stopTimer += dt;
+                    if (t.stopTimer >= RED_DURATION + YELLOW_DURATION) {
+                        t.stopped = false;
+                        t.speed = 10; // 缓慢起步
+                    }
+                }
+            } else {
+                aiTargetSpeed = 300;
+                const diff = aiTargetSpeed - t.speed;
+                const acc = 12;
+                t.speed += Math.abs(diff) < acc * dt ? diff : Math.sign(diff) * acc * dt;
+                t.speed = Math.max(0, Math.min(350, t.speed));
+            }
+            t.position += (t.speed / 3.6) * dt;
+            t.group.position.x = t.position;
+            if (Math.abs(t.position - trainPositionX) > 2000) { scene.remove(t.group); aiTrain = null; setTimeout(() => { if (!aiTrain) spawnAITrain(); }, 3000); }
+        }
+
+        function createChair() {
+            const group = new THREE.Group(); const sw = 0.55, sd = 0.50, st = 0.06, lh = 0.48, ls = 0.11, bw = 0.55, bh = 0.52, bt = 0.06; const mat = mChair();
+            const seat = new THREE.Mesh(new THREE.BoxGeometry(sw, st, sd), mat); seat.position.y = lh + st / 2; seat.castShadow = true; seat.receiveShadow = true; group.add(seat);
+            const legGeo = new THREE.BoxGeometry(ls, lh, ls); const offX = sw / 2 - ls / 2 - 0.03, offZ = sd / 2 - ls / 2 - 0.03;
+            [[-offX, lh / 2, -offZ], [offX, lh / 2, -offZ], [-offX, lh / 2, offZ], [offX, lh / 2, offZ]].forEach(([x, y, z]) => { const leg = new THREE.Mesh(legGeo, mat); leg.position.set(x, y, z); leg.castShadow = true; leg.receiveShadow = true; group.add(leg); });
+            const back = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bt), mat); back.position.set(0, lh + st + bh / 2, -sd / 2 + bt / 2 + 0.02); back.castShadow = true; back.receiveShadow = true; group.add(back);
+            group.scale.set(2, 2, 2); return group;
+        }
+        function createSignalLight() { /* 省略相同代码，保持原有实现 */ 
+            const group = new THREE.Group(); const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 5.5, 8), mSignalPole()); pole.position.y = GROUND_Y + 2.75; pole.castShadow = true; pole.receiveShadow = true; group.add(pole); const housing = new THREE.Mesh(new THREE.BoxGeometry(0.7, 2.2, 0.2), new THREE.MeshStandardMaterial({ color: '#3a3a3a', roughness: 0.4, metalness: 0.6 })); housing.position.y = GROUND_Y + 5.3; housing.position.z = -0.15; housing.castShadow = true; group.add(housing); const lightGeo = new THREE.SphereGeometry(0.22, 16, 8); const redMat = new THREE.MeshStandardMaterial({ color: '#4a1010', roughness: 0.2, metalness: 0.1, emissive: '#1a0000', emissiveIntensity: 0.3 }); const yellowMat = new THREE.MeshStandardMaterial({ color: '#cc6600', roughness: 0.2, metalness: 0.1, emissive: '#331100', emissiveIntensity: 0.3 }); const greenMat = new THREE.MeshStandardMaterial({ color: '#0a3a0a', roughness: 0.2, metalness: 0.1, emissive: '#001a00', emissiveIntensity: 0.3 }); const red = new THREE.Mesh(lightGeo, redMat); red.position.set(0, GROUND_Y + 6.05, 0.25); group.add(red); const yellow = new THREE.Mesh(lightGeo, yellowMat); yellow.position.set(0, GROUND_Y + 5.3, 0.25); group.add(yellow); const green = new THREE.Mesh(lightGeo, greenMat); green.position.set(0, GROUND_Y + 4.55, 0.25); group.add(green); return { group, red, yellow, green, redMat, yellowMat, greenMat }; 
+        }
+        function createStationMesh(station) { /* 省略，保持原有实现 */ 
+            const stationX = station.worldX; const group = new THREE.Group(); const platLen = PLATFORM_HALF_LENGTH * 2, platWidth = 5.5, platThick = 0.65; const platform = new THREE.Mesh(new THREE.BoxGeometry(platLen, platThick, platWidth), mPlatform()); platform.position.set(stationX, GROUND_Y + platThick / 2, TRACK_Z_UP + PLATFORM_Z_OFFSET); platform.castShadow = true; platform.receiveShadow = true; group.add(platform); const hw = 7.0, hd = 7.5, hh = 4.8; const wall = new THREE.Mesh(new THREE.BoxGeometry(hw, hh, hd), mStationWall()); wall.position.set(stationX, GROUND_Y + platThick + hh / 2, TRACK_Z_UP + PLATFORM_Z_OFFSET + platWidth / 2 + hd / 2 + 0.8); wall.castShadow = true; wall.receiveShadow = true; group.add(wall); const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(hw, hd) * 0.75, 2.0, 4, 1), mStationRoof()); roof.position.set(stationX, GROUND_Y + platThick + hh + 1.0, TRACK_Z_UP + PLATFORM_Z_OFFSET + platWidth / 2 + hd / 2 + 0.8); roof.rotation.y = Math.PI / 4; roof.castShadow = true; roof.receiveShadow = true; group.add(roof); const signBoard = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.8, 0.15), new THREE.MeshStandardMaterial({ color: '#f0e8d0', roughness: 0.4, metalness: 0.2 })); signBoard.position.set(stationX + 2.2, GROUND_Y + platThick + 3.1, TRACK_Z_UP + PLATFORM_Z_OFFSET + platWidth / 2 - 0.3); signBoard.castShadow = true; group.add(signBoard); const chairSpacing = 13, chairStart = stationX - platLen / 2 + 10, chairEnd = stationX + platLen / 2 - 10; const cz1 = TRACK_Z_UP + PLATFORM_Z_OFFSET + platWidth / 4, cz2 = TRACK_Z_UP + PLATFORM_Z_OFFSET - platWidth / 4; for (let cx = chairStart; cx <= chairEnd; cx += chairSpacing) { [cz1, cz2].forEach(zPos => { const chair = createChair(); chair.position.set(cx, GROUND_Y + platThick, zPos); chair.rotation.y = (zPos > TRACK_Z_UP + PLATFORM_Z_OFFSET) ? Math.PI : 0; group.add(chair); }); } const signalX = stationX + platLen / 2 + 6; const signalZ = TRACK_Z_UP + 2.8; const { group: sigGroup, red, yellow, green, redMat, yellowMat, greenMat } = createSignalLight(); sigGroup.position.set(signalX, 0, signalZ); sigGroup.rotation.y = -Math.PI / 2; group.add(sigGroup); station.signalGroup = sigGroup; station.signalRed = red; station.signalYellow = yellow; station.signalGreen = green; station.signalRedMat = redMat; station.signalYellowMat = yellowMat; station.signalGreenMat = greenMat; return group; 
+        }
+        function createCityBuildings(chunkStartX, seedBase) {
+            const cityGroup = new THREE.Group();
+            const cityX = chunkStartX + CHUNK_SIZE / 2;
+            const cityZ = TRACK_Z_UP + (sr(seedBase + 90000) > 0.5 ? 1 : -1) * srr(seedBase + 90001, 30, 65);
+            const buildingCount = sri(seedBase + 90002, 8, 18);
+            for (let i = 0; i < buildingCount; i++) {
+                const bSeed = seedBase + 91000 + i;
+                // 扩大3倍尺寸：宽7.5-18，深7.5-18，高24-84
+                const bw = srr(bSeed, 7.5, 18);
+                const bd = srr(bSeed + 100, 7.5, 18);
+                const bh = srr(bSeed + 200, 24, 84);
+                const bx = cityX + srr(bSeed + 300, -35, 35);
+                const bz = cityZ + srr(bSeed + 400, -30, 30);
+                // 增强防穿模检查，留出足够安全距离
+                if (Math.abs(bz - TRACK_Z_UP) < TRACK_CLEARANCE + Math.max(bw, bd) + 5) continue;
+                if (Math.abs(bz - TRACK_Z_DOWN) < TRACK_CLEARANCE + Math.max(bw, bd) + 5) continue;
+                const buildingGroup = new THREE.Group();
+                const body = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), mCityBuilding());
+                body.position.y = GROUND_Y + bh / 2;
+                body.castShadow = true; body.receiveShadow = true;
+                buildingGroup.add(body);
+                const windowSize = 0.8;
+                const windowSpacingX = 1.8;
+                const windowSpacingY = 2.2;
+                const windowMargin = 1.5;
+                const cols = Math.floor((bw - windowMargin * 2) / windowSpacingX);
+                const rows = Math.floor((bh - windowMargin * 2) / windowSpacingY);
+                for (let row = 0; row < rows; row++) {
+                    for (let col = 0; col < cols; col++) {
+                        const lit = Math.random() > 0.4;
+                        const winMat = lit ? mCityWindowLit() : mCityWindowDark();
+                        const winGeo = new THREE.BoxGeometry(windowSize, windowSize, 0.1);
+                        const win = new THREE.Mesh(winGeo, winMat);
+                        const wx = -bw / 2 + windowMargin + col * windowSpacingX + windowSpacingX / 2;
+                        const wy = GROUND_Y + windowMargin + row * windowSpacingY + windowSpacingY / 2;
+                        win.position.set(wx, wy, bd / 2 + 0.06);
+                        buildingGroup.add(win);
+                        const winBack = new THREE.Mesh(winGeo, winMat);
+                        winBack.position.set(wx, wy, -bd / 2 - 0.06);
+                        buildingGroup.add(winBack);
+                    }
+                }
+                for (let row = 0; row < rows; row++) {
+                    for (let col = 0; col < Math.floor((bd - windowMargin * 2) / windowSpacingX); col++) {
+                        const lit = Math.random() > 0.4;
+                        const winMat = lit ? mCityWindowLit() : mCityWindowDark();
+                        const winGeo = new THREE.BoxGeometry(0.1, windowSize, windowSize);
+                        const win = new THREE.Mesh(winGeo, winMat);
+                        const wz = -bd / 2 + windowMargin + col * windowSpacingX + windowSpacingX / 2;
+                        const wy = GROUND_Y + windowMargin + row * windowSpacingY + windowSpacingY / 2;
+                        win.position.set(bw / 2 + 0.06, wy, wz);
+                        buildingGroup.add(win);
+                        const winBack = new THREE.Mesh(winGeo, winMat);
+                        winBack.position.set(-bw / 2 - 0.06, wy, wz);
+                        buildingGroup.add(winBack);
+                    }
+                }
+                buildingGroup.position.set(bx, 0, bz);
+                cityGroup.add(buildingGroup);
+            }
+            return cityGroup;
+        }
+        function createCactus(seed) { /* 保持原有 */ 
+            const group = new THREE.Group(); const trunkH = srr(seed, 2.2, 4.5); const trunkGeo = new THREE.CylinderGeometry(0.08, 0.15, trunkH, 10, 4); const trunk = new THREE.Mesh(trunkGeo, mCactus()); trunk.position.y = GROUND_Y + trunkH / 2; trunk.castShadow = true; trunk.receiveShadow = true; group.add(trunk); const branchCount = sri(seed + 100, 1, 3); for (let b = 0; b < branchCount; b++) { const bAngle = srr(seed + 200 + b, 0, Math.PI * 2); const bHeight = srr(seed + 300 + b, trunkH * 0.35, trunkH * 0.8); const bLen = srr(seed + 400 + b, 0.8, 1.8); const branchGeo = new THREE.CylinderGeometry(0.05, 0.08, bLen, 8, 4); const branch = new THREE.Mesh(branchGeo, mCactus()); branch.position.y = GROUND_Y + bHeight; branch.position.x = Math.cos(bAngle) * 0.18; branch.position.z = Math.sin(bAngle) * 0.18; branch.rotation.z = Math.cos(bAngle) * 1.1; branch.rotation.x = Math.sin(bAngle) * 1.1; branch.castShadow = true; branch.receiveShadow = true; group.add(branch); } return group; 
+        }
+        function createTerrainFeatures(chunkGroup, chunkStartX, chunkIndex, terrainType) { /* 保持原有，仅调用城市生成时不变 */ 
+            const fg = new THREE.Group(); const seedBase = chunkIndex * 10000; const isGrassland = terrainType === 'grassland'; const isDesert = terrainType === 'desert'; const isSnow = terrainType === 'snow';
+            const hillCount = isDesert ? sri(seedBase + 1, 4, 9) : sri(seedBase + 1, 3, 7);
+            for (let i = 0; i < hillCount; i++) { const hSeed = seedBase + 100 + i; const hRadius = srr(hSeed + 400, 10, 42); const side = sr(hSeed + 200) > 0.5 ? 1 : -1; const hz = TRACK_Z_UP + side * srr(hSeed + 300, TRACK_CLEARANCE + hRadius + 1.5, TERRAIN_HALF_WIDTH - hRadius * 0.6); const hx = chunkStartX + srr(hSeed, 18, CHUNK_SIZE - 18); const flatten = srr(hSeed + 600, 0.28, 0.58); const hillGeo = new THREE.SphereGeometry(hRadius, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2.1); const pos = hillGeo.attributes.position; for (let vi = 0; vi < pos.count; vi++) { const y = pos.getY(vi); if (y > 0) pos.setY(vi, y * flatten); } hillGeo.computeVertexNormals(); let hillMat; if (isGrassland) hillMat = [mHillGrassA(), mHillGrassB(), mHillGrassC()][sri(hSeed + 700, 0, 2)]; else if (isDesert) hillMat = [mHillDesertA(), mHillDesertB(), mHillDesertC()][sri(hSeed + 700, 0, 2)]; else hillMat = [mHillSnowA(), mHillSnowB(), mHillSnowC()][sri(hSeed + 700, 0, 2)]; const hill = new THREE.Mesh(hillGeo, hillMat); hill.position.set(hx, GROUND_Y - hRadius * flatten * 0.15, hz); hill.castShadow = true; hill.receiveShadow = true; fg.add(hill); }
+            if (isDesert) { const treeCount = sri(seedBase + 2, 2, 8); for (let i = 0; i < treeCount; i++) { const tSeed = seedBase + 1000 + i; const tx = chunkStartX + srr(tSeed, 6, CHUNK_SIZE - 6); const tz = TRACK_Z_UP + (sr(tSeed + 2000) > 0.5 ? 1 : -1) * srr(tSeed + 3000, TRACK_CLEARANCE + 3.5, TERRAIN_HALF_WIDTH - 6); const treeH = srr(tSeed + 4000, 2, 5); const treeGrp = new THREE.Group(); const trunkH = treeH * 0.42; const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.11, trunkH, 8, 4), new THREE.MeshStandardMaterial({ color: '#8b7355', roughness: 0.7, metalness: 0.03 })); trunk.position.y = GROUND_Y + trunkH / 2; trunk.castShadow = true; trunk.receiveShadow = true; treeGrp.add(trunk); const crownBase = GROUND_Y + trunkH; const leafMat = new THREE.MeshStandardMaterial({ color: '#9e8d60', roughness: 0.7, metalness: 0.02 }); const crown = new THREE.Mesh(getSphereSmallGeo(), leafMat); crown.position.set(0, crownBase + treeH * 0.3, 0); crown.scale.setScalar(srr(tSeed + 10000, 0.5, 1.0)); crown.castShadow = true; crown.receiveShadow = true; treeGrp.add(crown); treeGrp.position.set(tx, 0, tz); fg.add(treeGrp); } const cactusCount = sri(seedBase + 8, 3, 9); for (let i = 0; i < cactusCount; i++) { const cSeed = seedBase + 40000 + i; const cx = chunkStartX + srr(cSeed, 6, CHUNK_SIZE - 6); const cz = TRACK_Z_UP + (sr(cSeed + 100) > 0.5 ? 1 : -1) * srr(cSeed + 200, TRACK_CLEARANCE + 3, TERRAIN_HALF_WIDTH - 5); const cactus = createCactus(cSeed + 300); cactus.position.set(cx, 0, cz); fg.add(cactus); } }
+            else if (isSnow) { const treeCount = sri(seedBase + 2, 15, 40); for (let i = 0; i < treeCount; i++) { const tSeed = seedBase + 1000 + i; const tx = chunkStartX + srr(tSeed, 6, CHUNK_SIZE - 6); const tz = TRACK_Z_UP + (sr(tSeed + 2000) > 0.5 ? 1 : -1) * srr(tSeed + 3000, TRACK_CLEARANCE + 3.5, TERRAIN_HALF_WIDTH - 6); const treeH = srr(tSeed + 4000, 3, 9); const treeGrp = new THREE.Group(); const trunkH = treeH * 0.42; const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.13, trunkH, 8, 4), mTrunkSnow()); trunk.position.y = GROUND_Y + trunkH / 2; trunk.castShadow = true; trunk.receiveShadow = true; treeGrp.add(trunk); const crownBase = GROUND_Y + trunkH; const leafMat = [mLeavesSnowA(), mLeavesSnowB(), mLeavesSnowC()][sri(tSeed + 6000, 0, 2)]; for (let c = 0; c < sri(tSeed + 5000, 1, 3); c++) { const crownGeo = c === 0 ? (sr(tSeed + 7000 + c) > 0.5 ? getConeGeo() : getSphereGeo()) : (sr(tSeed + 7000 + c) > 0.5 ? getConeSmallGeo() : getSphereSmallGeo()); const crown = new THREE.Mesh(crownGeo, leafMat); crown.position.set(srr(tSeed + 8000 + c, -0.9, 0.9), crownBase + c * treeH * 0.24, srr(tSeed + 9000 + c, -0.9, 0.9)); crown.scale.setScalar(srr(tSeed + 10000 + c, 0.65, 1.25)); crown.castShadow = true; crown.receiveShadow = true; treeGrp.add(crown); } treeGrp.position.set(tx, 0, tz); fg.add(treeGrp); } }
+            else { for (let i = 0; i < sri(seedBase + 2, 20, 50); i++) { const tSeed = seedBase + 1000 + i; const tx = chunkStartX + srr(tSeed, 6, CHUNK_SIZE - 6); const tz = TRACK_Z_UP + (sr(tSeed + 2000) > 0.5 ? 1 : -1) * srr(tSeed + 3000, TRACK_CLEARANCE + 3.5, TERRAIN_HALF_WIDTH - 6); const treeH = srr(tSeed + 4000, 3, 9); const treeGrp = new THREE.Group(); const trunkH = treeH * 0.42; const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.13, trunkH, 8, 4), mTrunk()); trunk.position.y = GROUND_Y + trunkH / 2; trunk.castShadow = true; trunk.receiveShadow = true; treeGrp.add(trunk); const crownBase = GROUND_Y + trunkH; const leafMat = [mLeavesA(), mLeavesB(), mLeavesC()][sri(tSeed + 6000, 0, 2)]; for (let c = 0; c < sri(tSeed + 5000, 1, 3); c++) { const crownGeo = c === 0 ? (sr(tSeed + 7000 + c) > 0.5 ? getConeGeo() : getSphereGeo()) : (sr(tSeed + 7000 + c) > 0.5 ? getConeSmallGeo() : getSphereSmallGeo()); const crown = new THREE.Mesh(crownGeo, leafMat); crown.position.set(srr(tSeed + 8000 + c, -0.9, 0.9), crownBase + c * treeH * 0.24, srr(tSeed + 9000 + c, -0.9, 0.9)); crown.scale.setScalar(srr(tSeed + 10000 + c, 0.65, 1.25)); crown.castShadow = true; crown.receiveShadow = true; treeGrp.add(crown); } treeGrp.position.set(tx, 0, tz); fg.add(treeGrp); } }
+            const houseCount = isDesert ? sri(seedBase + 3, 1, 5) : sri(seedBase + 3, 0, 4);
+            for (let i = 0; i < houseCount; i++) { const hSeed = seedBase + 20000 + i; const hx = chunkStartX + srr(hSeed, 12, CHUNK_SIZE - 12); const hz = TRACK_Z_UP + (sr(hSeed + 100) > 0.5 ? 1 : -1) * srr(hSeed + 200, BUILDING_CLEARANCE + 6, TERRAIN_HALF_WIDTH - 20); const hw = srr(hSeed + 300, 4.5, 10), hd = srr(hSeed + 400, 3.5, 8), hh = srr(hSeed + 500, 3.5, 7); const houseGrp = new THREE.Group(); let wallMat, roofMat; if (isDesert) { wallMat = mWallDesert(); roofMat = mRoofDesert(); } else if (isSnow) { wallMat = mWallSnow(); roofMat = mRoofSnow(); } else { wallMat = sr(hSeed + 600) > 0.5 ? mWallA() : mWallB(); roofMat = sr(hSeed + 900) > 0.5 ? mRoofA() : mRoofB(); } const wall = new THREE.Mesh(new THREE.BoxGeometry(hw, hh, hd), wallMat); wall.position.y = GROUND_Y + hh / 2; wall.castShadow = true; wall.receiveShadow = true; houseGrp.add(wall); const roofH = srr(hSeed + 800, 1.8, 3.5); const roofGeo = isDesert ? new THREE.BoxGeometry(hw * 0.9, roofH * 0.6, hd * 0.9) : new THREE.ConeGeometry(Math.max(hw, hd) * 0.78, roofH, 4, 1); const roof = new THREE.Mesh(roofGeo, roofMat); roof.position.y = GROUND_Y + hh + roofH / 2; if (!isDesert) roof.rotation.y = Math.PI / 4; roof.castShadow = true; roof.receiveShadow = true; houseGrp.add(roof); if (!isDesert && sr(hSeed + 1000) > 0.45) { const chim = new THREE.Mesh(new THREE.BoxGeometry(0.55, srr(hSeed + 1100, 1.4, 2.5), 0.55), roofMat); chim.position.set(hw * 0.32, GROUND_Y + hh + 0.8, hd * 0.28); chim.castShadow = true; houseGrp.add(chim); } houseGrp.position.set(hx, 0, hz); houseGrp.rotation.y = srr(hSeed + 1200, 0, Math.PI * 2); fg.add(houseGrp); }
+            const bushCount = isDesert ? sri(seedBase + 4, 5, 15) : (isSnow ? sri(seedBase + 4, 8, 25) : sri(seedBase + 4, 15, 40));
+            for (let i = 0; i < bushCount; i++) { const bSeed = seedBase + 30000 + i; const bx = chunkStartX + srr(bSeed, 3, CHUNK_SIZE - 3); const bz = TRACK_Z_UP + (sr(bSeed + 100) > 0.5 ? 1 : -1) * srr(bSeed + 200, TRACK_CLEARANCE + 2, TERRAIN_HALF_WIDTH - 4); let bushMat; if (isGrassland) bushMat = mHillGrassA(); else if (isDesert) bushMat = mBushDesert(); else bushMat = mBushSnow(); const bush = new THREE.Mesh(new THREE.SphereGeometry(srr(bSeed + 300, 0.4, 1.6), 8, 5), bushMat); bush.position.set(bx, GROUND_Y + srr(bSeed + 400, 0.35, 1.0), bz); bush.scale.y = srr(bSeed + 500, 0.45, 0.85); bush.castShadow = true; bush.receiveShadow = true; fg.add(bush); }
+            let grassCount, grassColorBase; if (isDesert) { grassCount = 30; grassColorBase = { r: 0.88, g: 0.84, b: 0.28 }; } else if (isSnow) { grassCount = 200; grassColorBase = { r: 0.75, g: 0.75, b: 0.82 }; } else { grassCount = 500; grassColorBase = { r: 0.08, g: 0.45, b: 0.04 }; }
+            const grassVertices = []; const grassColors = [];
+            for (let i = 0; i < grassCount; i++) { const gx = chunkStartX + srr(seedBase + 50000 + i, 5, CHUNK_SIZE - 5); const side = sr(seedBase + 50100 + i) > 0.5 ? 1 : -1; const minGz = TRACK_Z_DOWN + TRACK_CLEARANCE + 1; const maxGz = TERRAIN_HALF_WIDTH - 3; const gz = TRACK_Z_UP + side * srr(seedBase + 50200 + i, minGz, maxGz); const gh = srr(seedBase + 50300 + i, 0.12, 0.45); grassVertices.push(gx, GROUND_Y + 0.01, gz); grassVertices.push(gx, GROUND_Y + 0.01 + gh, gz); const gVar = srr(seedBase + 50400 + i, -0.06, 0.06); grassColors.push(grassColorBase.r + gVar, grassColorBase.g + gVar, grassColorBase.b + gVar); grassColors.push(grassColorBase.r + gVar + 0.04, grassColorBase.g + gVar + 0.06, grassColorBase.b + gVar + 0.02); }
+            if (grassVertices.length > 0) { const grassGeo = new THREE.BufferGeometry(); grassGeo.setAttribute('position', new THREE.Float32BufferAttribute(grassVertices, 3)); grassGeo.setAttribute('color', new THREE.Float32BufferAttribute(grassColors, 3)); const grassMat = new THREE.LineBasicMaterial({ vertexColors: true }); const grass = new THREE.LineSegments(grassGeo, grassMat); fg.add(grass); }
+            if (sr(seedBase + 80000) > 0.55) { fg.add(createCityBuildings(chunkStartX, seedBase)); }
+            chunkGroup.add(fg);
+        }
+        function createRailTrack(chunkGroup, chunkStartX, trackZ) { /* 保持原有 */ 
+            const tg = new THREE.Group(); const midX = chunkStartX + CHUNK_SIZE / 2; const ballast = new THREE.Mesh(getBallastGeo(), mBallast()); ballast.position.set(midX, BALLAST_Y - 0.11, trackZ); ballast.castShadow = true; ballast.receiveShadow = true; tg.add(ballast); const slab = new THREE.Mesh(getSlabGeo(), new THREE.MeshStandardMaterial({ color: '#bab5ac', roughness: 0.58, metalness: 0.07 })); slab.position.set(midX, BALLAST_Y + 0.04, trackZ); slab.receiveShadow = true; tg.add(slab); const sleeperGeo = getSleeperGeo(), sleeperMat = mSleeper(); for (let i = 0; i <= Math.floor(CHUNK_SIZE / 1.6); i++) { const sx = chunkStartX + i * 1.6; if (sx > chunkStartX + CHUNK_SIZE) break; const sleeper = new THREE.Mesh(sleeperGeo, sleeperMat); sleeper.position.set(sx, BALLAST_Y + 0.07, trackZ); sleeper.castShadow = true; sleeper.receiveShadow = true; tg.add(sleeper); } const railGeo = getRailGeo(), railMat = mRail(); for (let side = -1; side <= 1; side += 2) { const rail = new THREE.Mesh(railGeo, railMat); rail.position.set(midX, RAIL_TOP_Y, trackZ + side * RAIL_OFFSET_Z); rail.castShadow = true; rail.receiveShadow = true; tg.add(rail); } chunkGroup.add(tg); 
+        }
+        const activeChunks = new Map();
+        function getChunkIndex(wx) { return Math.floor(wx / CHUNK_SIZE); }
+        function getChunkStartX(idx) { return idx * CHUNK_SIZE; }
+        function removeChunk(idx, group) { scene.remove(group); group.traverse(child => { if (child.geometry && !Object.values(geoCache).includes(child.geometry)) child.geometry.dispose(); if (child.material) { const mats = Array.isArray(child.material) ? child.material : [child.material]; mats.forEach(m => { if (m && !Object.values(matCache).includes(m) && typeof m.dispose === 'function') m.dispose(); }); } }); }
+        function generateChunk(chunkIndex) { const chunkStartX = getChunkStartX(chunkIndex); const terrainType = getTerrainType(chunkStartX); const chunkGroup = new THREE.Group(); chunkGroup.name = `chunk-${chunkIndex}`; const midX = chunkStartX + CHUNK_SIZE / 2; let groundMat; if (terrainType === 'desert') groundMat = mGroundDesert(); else if (terrainType === 'snow') groundMat = mGroundSnow(); else groundMat = mGroundGrass(); const ground = new THREE.Mesh(new THREE.PlaneGeometry(CHUNK_SIZE + OVERLAP + 2, TERRAIN_HALF_WIDTH * 2 + 8), groundMat); ground.rotation.x = -Math.PI / 2; ground.position.set(midX, GROUND_Y, 0); ground.receiveShadow = true; chunkGroup.add(ground); createRailTrack(chunkGroup, chunkStartX, TRACK_Z_UP); createRailTrack(chunkGroup, chunkStartX, TRACK_Z_DOWN); createTerrainFeatures(chunkGroup, chunkStartX, chunkIndex, terrainType); const chunkMinX = chunkStartX, chunkMaxX = chunkStartX + CHUNK_SIZE; for (const station of stations) { if (station.worldX >= chunkMinX && station.worldX < chunkMaxX) { chunkGroup.add(createStationMesh(station)); } } scene.add(chunkGroup); return chunkGroup; }
+        function updateChunks(camX) { const currentIdx = getChunkIndex(camX); const minChunk = currentIdx - BEHIND_CHUNKS, maxChunk = currentIdx + AHEAD_CHUNKS; for (const [idx, group] of activeChunks) { if (idx < minChunk || idx > maxChunk) { removeChunk(idx, group); activeChunks.delete(idx); } } for (let i = minChunk; i <= maxChunk; i++) { if (!activeChunks.has(i)) activeChunks.set(i, generateChunk(i)); } }
+        function createDistantMountains() { const mg = new THREE.Group(); mg.name = 'distant-mountains'; for (let i = 0; i < 18; i++) { const seed = 90000 + i; const mRadius = srr(seed, 35, 90); const mz = TRACK_Z_UP + (sr(seed + 200) > 0.5 ? 1 : -1) * srr(seed + 300, 90, TERRAIN_HALF_WIDTH + 60); const flat = srr(seed + 400, 0.2, 0.45); const mGeo = new THREE.SphereGeometry(mRadius, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2.3); const pos = mGeo.attributes.position; for (let vi = 0; vi < pos.count; vi++) { const y = pos.getY(vi); if (y > 0) pos.setY(vi, y * flat); } mGeo.computeVertexNormals(); const m = new THREE.Mesh(mGeo, [mHillGrassB(), mHillGrassC(), mHillGrassA()][sri(seed + 500, 0, 2)]); m.position.set(srr(seed + 100, -400, 1400), GROUND_Y - mRadius * flat * 0.2, mz); m.castShadow = true; m.receiveShadow = true; mg.add(m); } scene.add(mg); return mg; }
+        const distantMountains = createDistantMountains();
+        let trainPositionX = 0, speedKmh = 300, targetSpeedKmh = 300, isPaused = false, totalDistanceKm = 0;
+        const maxSpeedKmh = 420, minSpeedKmh = 0;
+        function getMaxAccel(s, acc) { const abs = Math.abs(s); let a; if (abs < 50) a = 25; else if (abs < 150) a = 15; else if (abs < 250) a = 8; else if (abs < 350) a = 4; else a = 2; return acc ? a : a * 1.3; }
+        let throttlePosition = targetSpeedKmh / maxSpeedKmh; let brakePosition = 0; let activeLever = null;
+        const MAX_BRAKE_DECEL = 48;
+        const throttleTrack = document.getElementById('throttle-track'); const throttleFill = document.getElementById('throttle-fill'); const throttleHandle = document.getElementById('throttle-handle');
+        const brakeTrack = document.getElementById('brake-track'); const brakeFill = document.getElementById('brake-fill'); const brakeHandle = document.getElementById('brake-handle');
+        function updateLeverUI(leverType) { if (leverType === 'throttle' || leverType === 'both') { const pct = throttlePosition * 100; throttleFill.style.height = pct + '%'; throttleHandle.style.top = (100 - pct) + '%'; throttleHandle.classList.toggle('active', throttlePosition > 0.03); } if (leverType === 'brake' || leverType === 'both') { const pct = brakePosition * 100; brakeFill.style.height = pct + '%'; brakeHandle.style.top = (100 - pct) + '%'; brakeHandle.classList.toggle('active', brakePosition > 0.03); } }
+        function getLeverPositionFromEvent(e, trackEl) { const rect = trackEl.getBoundingClientRect(); const clientY = e.touches ? e.touches[0].clientY : e.clientY; let pos = 1 - (clientY - rect.top) / rect.height; return Math.max(0, Math.min(1, pos)); }
+        function onLeverStart(e, leverType) { e.preventDefault(); e.stopPropagation(); const trackEl = leverType === 'throttle' ? throttleTrack : brakeTrack; activeLever = leverType; const pos = getLeverPositionFromEvent(e, trackEl); if (leverType === 'throttle') { throttlePosition = pos; targetSpeedKmh = throttlePosition * maxSpeedKmh; } else { brakePosition = pos; } updateLeverUI(leverType); document.body.classList.add('grabbing'); }
+        function onLeverMove(e) { if (!activeLever) return; e.preventDefault(); e.stopPropagation(); const trackEl = activeLever === 'throttle' ? throttleTrack : brakeTrack; const pos = getLeverPositionFromEvent(e, trackEl); if (activeLever === 'throttle') { throttlePosition = pos; targetSpeedKmh = throttlePosition * maxSpeedKmh; } else { brakePosition = pos; } updateLeverUI(activeLever); }
+        function onLeverEnd(e) { if (!activeLever) return; e.preventDefault(); e.stopPropagation(); activeLever = null; document.body.classList.remove('grabbing'); }
+        throttleTrack.addEventListener('mousedown', (e) => onLeverStart(e, 'throttle')); throttleTrack.addEventListener('touchstart', (e) => onLeverStart(e, 'throttle'), { passive: false }); throttleHandle.addEventListener('mousedown', (e) => onLeverStart(e, 'throttle')); throttleHandle.addEventListener('touchstart', (e) => onLeverStart(e, 'throttle'), { passive: false });
+        brakeTrack.addEventListener('mousedown', (e) => onLeverStart(e, 'brake')); brakeTrack.addEventListener('touchstart', (e) => onLeverStart(e, 'brake'), { passive: false }); brakeHandle.addEventListener('mousedown', (e) => onLeverStart(e, 'brake')); brakeHandle.addEventListener('touchstart', (e) => onLeverStart(e, 'brake'), { passive: false });
+        window.addEventListener('mousemove', (e) => { if (activeLever) onLeverMove(e); }); window.addEventListener('touchmove', (e) => { if (activeLever) onLeverMove(e); }, { passive: false });
+        window.addEventListener('mouseup', onLeverEnd); window.addEventListener('touchend', onLeverEnd); window.addEventListener('touchcancel', onLeverEnd);
+        updateLeverUI('both');
+        const gaugeCanvas = document.getElementById('gauge-canvas'); const gaugeCtx = gaugeCanvas.getContext('2d');
+        const gaugeW = 520, gaugeH = 270, gaugeCx = 260, gaugeCy = 255, gaugeRadius = 210;
+        function drawGauge(speed) { /* 保持原有 */ 
+            const ctx = gaugeCtx, cx = gaugeCx, cy = gaugeCy, r = gaugeRadius; ctx.clearRect(0, 0, gaugeW, gaugeH); ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, r + 14, Math.PI, 0); ctx.lineTo(cx + r + 14, cy); ctx.lineTo(cx - r - 14, cy); ctx.closePath(); const bgGrad = ctx.createRadialGradient(cx, cy, r * 0.5, cx, cy, r + 14); bgGrad.addColorStop(0, 'rgba(22,22,30,0.85)'); bgGrad.addColorStop(1, 'rgba(10,10,16,0.92)'); ctx.fillStyle = bgGrad; ctx.fill(); ctx.restore(); const arcThick = 22, arcR = r - 6; [{ s: 0, e: 150, c: '#4caf50' }, { s: 150, e: 300, c: '#ffc107' }, { s: 300, e: 380, c: '#ff9800' }, { s: 380, e: 420, c: '#f44336' }].forEach(seg => { ctx.beginPath(); ctx.arc(cx, cy, arcR, Math.PI - (seg.s / 420) * Math.PI, Math.PI - (seg.e / 420) * Math.PI); ctx.strokeStyle = seg.c; ctx.lineWidth = arcThick; ctx.stroke(); }); const tickOuterR = r - arcThick - 6; for (let i = 0; i <= 42; i++) { const sv = i * 10, angle = Math.PI - (sv / 420) * Math.PI, isMajor = sv % 50 === 0; const innerR = isMajor ? tickOuterR - 30 : tickOuterR - 18; const cosA = Math.cos(angle), sinA = Math.sin(angle); ctx.beginPath(); ctx.moveTo(cx + cosA * tickOuterR, cy - sinA * tickOuterR); ctx.lineTo(cx + cosA * innerR, cy - sinA * innerR); ctx.strokeStyle = isMajor ? '#e0e0e0' : 'rgba(200,200,210,0.5)'; ctx.lineWidth = isMajor ? 2.5 : 1.2; ctx.stroke(); if (isMajor && sv <= 420) { const lx = cx + cosA * (innerR - 22), ly = cy - sinA * (innerR - 22); ctx.fillStyle = '#e8e8f0'; ctx.font = 'bold 20px "PingFang SC","Microsoft YaHei",sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(sv, lx, ly); } } const sc = Math.min(Math.max(speed, 0), 420); const pAngle = Math.PI - (sc / 420) * Math.PI, pLen = r - 55; const pTipX = cx + Math.cos(pAngle) * pLen, pTipY = cy - Math.sin(pAngle) * pLen; ctx.save(); ctx.beginPath(); ctx.moveTo(cx - 10, cy); ctx.lineTo(pTipX, pTipY); ctx.lineTo(cx + 10, cy); ctx.closePath(); ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fill(); ctx.restore(); const pGrad = ctx.createLinearGradient(cx, cy, pTipX, pTipY); pGrad.addColorStop(0, '#ff3b3b'); pGrad.addColorStop(1, '#ff6b6b'); ctx.beginPath(); ctx.moveTo(cx - 8, cy); ctx.lineTo(pTipX, pTipY); ctx.lineTo(cx + 8, cy); ctx.closePath(); ctx.fillStyle = pGrad; ctx.fill(); ctx.strokeStyle = '#cc2020'; ctx.lineWidth = 2; ctx.stroke(); const cGrad = ctx.createRadialGradient(cx, cy, 6, cx, cy, 22); cGrad.addColorStop(0, '#ffffff'); cGrad.addColorStop(0.5, '#e0e0e0'); cGrad.addColorStop(1, '#888888'); ctx.beginPath(); ctx.arc(cx, cy, 22, 0, Math.PI * 2); ctx.fillStyle = cGrad; ctx.fill(); ctx.strokeStyle = '#555'; ctx.lineWidth = 2; ctx.stroke(); ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.fillStyle = '#d00'; ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 52px "SF Mono","Consolas","Monaco","PingFang SC",monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(Math.round(sc), cx, cy - 48); ctx.fillStyle = '#aaa'; ctx.font = '18px "PingFang SC","Microsoft YaHei",sans-serif'; ctx.fillText('km/h', cx, cy - 12); 
+        }
+        function updateSignalLights(station, phase) { if (!station?.signalRedMat) return; const r = station.signalRedMat, y = station.signalYellowMat, g = station.signalGreenMat; switch (phase) { case 'red': r.color.set('#ff2020'); r.emissive.set('#ff0000'); r.emissiveIntensity = 1.2; y.color.set('#cc6600'); y.emissive.set('#331100'); y.emissiveIntensity = 0.3; g.color.set('#0a3a0a'); g.emissive.set('#001a00'); g.emissiveIntensity = 0.3; break; case 'yellow': r.color.set('#4a1010'); r.emissive.set('#1a0000'); r.emissiveIntensity = 0.3; y.color.set('#ffff00'); y.emissive.set('#ffcc00'); y.emissiveIntensity = 1.2; g.color.set('#0a3a0a'); g.emissive.set('#001a00'); g.emissiveIntensity = 0.3; break; case 'green': r.color.set('#4a1010'); r.emissive.set('#1a0000'); r.emissiveIntensity = 0.3; y.color.set('#cc6600'); y.emissive.set('#331100'); y.emissiveIntensity = 0.3; g.color.set('#40ff40'); g.emissive.set('#00ff00'); g.emissiveIntensity = 1.2; break; default: r.color.set('#4a1010'); r.emissive.set('#1a0000'); r.emissiveIntensity = 0.3; y.color.set('#cc6600'); y.emissive.set('#331100'); y.emissiveIntensity = 0.3; g.color.set('#0a3a0a'); g.emissive.set('#001a00'); g.emissiveIntensity = 0.3; } }
+        const SPEED_LIMIT_ZONES = [{ maxDist: 300, limit: 50 }, { maxDist: 500, limit: 70 }, { maxDist: 1000, limit: 100 }, { maxDist: 2000, limit: 200 }, { maxDist: 4000, limit: 300 }];
+        const GRACE_PERIOD = 25; const SKIP_STATION_LIMIT = 270; const SKIP_GRACE_PERIOD = 20; const SKIP_LIMIT_DISTANCE = 2700;
+        let speedLimitState = { activeLimit: null, timer: 0, penalized: false, graceActive: false };
+        function getCurrentSpeedLimit(distToStation) { const station = getCurrentTargetStation(); if (!station || distToStation <= 0) return null; if (station.allowSkip && distToStation <= SKIP_LIMIT_DISTANCE) return SKIP_STATION_LIMIT; if (!station.allowSkip) { for (const zone of SPEED_LIMIT_ZONES) { if (distToStation <= zone.maxDist) return zone.limit; } } return null; }
+        function handleSpeedLimit(dt) { if (isPaused) return; const station = getCurrentTargetStation(); if (!station) { speedLimitState.activeLimit = null; speedLimitState.timer = 0; speedLimitState.penalized = false; speedLimitState.graceActive = false; speedLimitDisplay.textContent = '⏱ 限速：-- km/h'; speedLimitDisplay.className = ''; return; } const dist = station.worldX - trainPositionX; const limit = getCurrentSpeedLimit(dist); if (limit === null) { speedLimitState.activeLimit = null; speedLimitState.timer = 0; speedLimitState.penalized = false; speedLimitState.graceActive = false; speedLimitDisplay.textContent = '⏱ 限速：-- km/h'; speedLimitDisplay.className = ''; return; } if (speedLimitState.activeLimit !== limit) { speedLimitState.activeLimit = limit; speedLimitState.timer = 0; speedLimitState.penalized = false; speedLimitState.graceActive = false; } const currentSpeed = speedKmh; const isOverspeed = currentSpeed > limit; const currentGrace = (station.allowSkip && limit === SKIP_STATION_LIMIT) ? SKIP_GRACE_PERIOD : GRACE_PERIOD; if (!isOverspeed) { speedLimitState.timer = 0; speedLimitState.graceActive = false; if (speedLimitState.penalized) { speedLimitState.penalized = false; } speedLimitDisplay.textContent = `⏱ 限速：${limit} km/h`; speedLimitDisplay.className = ''; } else { if (!speedLimitState.penalized) { speedLimitState.timer += dt; const remaining = Math.max(0, currentGrace - speedLimitState.timer); speedLimitDisplay.textContent = `⏱ 限速：${limit} km/h | 宽限 ${remaining.toFixed(1)}s`; speedLimitDisplay.className = 'overspeed'; if (speedLimitState.timer >= currentGrace) { score -= 25; speedLimitState.penalized = true; speedLimitState.graceActive = false; setOverrideMessage(`⚠️ 超时未减速！限速${limit}km/h  -25分`, 2500); speedLimitDisplay.classList.add('timeout-warning'); } else { speedLimitState.graceActive = true; speedLimitDisplay.classList.remove('timeout-warning'); } } else { speedLimitDisplay.textContent = `⏱ 限速：${limit} km/h ⚠️ 已违规`; speedLimitDisplay.className = 'timeout-warning'; } } }
+        function setOverrideMessage(msg, dur = 3000) { overrideMessage = msg; setTimeout(() => { if (overrideMessage === msg) overrideMessage = null; }, dur); }
+        function handleStationStop() { if (isPaused) return; const station = getCurrentTargetStation(); if (!station) return; const onPlatform = isOnPlatform(trainPositionX); const isStopped = speedKmh < STOP_THRESHOLD; const isMoving = speedKmh >= DEPART_THRESHOLD; if (station.allowSkip && onPlatform && isStopped && !station.hasAwarded) { score -= 15; station.hasAwarded = true; station.visited = true; nextStationIndex++; setOverrideMessage(`⚠️ ${station.name} 可跨站禁止停车！-15分`, 3000); updateSignalLights(station, 'none'); station.stopPhase = 'none'; station.stopStartTime = 0; lastStopX = trainPositionX; stopCooldownActive = true; speedLimitState.timer = 0; speedLimitState.penalized = false; speedLimitState.graceActive = false; return; } if (!station.allowSkip && onPlatform && isStopped) { if (station.stopPhase === 'none' && !station.hasAwarded) { station.stopPhase = 'red'; station.stopStartTime = elapsedSimTime; station.hasAwarded = false; updateSignalLights(station, 'red'); setOverrideMessage(`🔴 ${station.name} 停车，等待40秒...`, 2500); } } if (!station.allowSkip && station.stopPhase === 'red') { if (elapsedSimTime - station.stopStartTime >= RED_DURATION) { station.stopPhase = 'yellow'; updateSignalLights(station, 'yellow'); setOverrideMessage(`🟡 ${station.name} 即将发车...`, 1500); } } if (!station.allowSkip && station.stopPhase === 'yellow') { if (elapsedSimTime - station.stopStartTime >= RED_DURATION + YELLOW_DURATION) { station.stopPhase = 'green'; updateSignalLights(station, 'green'); setOverrideMessage(`🟢 ${station.name} 可以发车！`, 3000); } } if (!station.allowSkip && onPlatform && isMoving) { if (station.stopPhase === 'green' && !station.hasAwarded) { score += 20; station.hasAwarded = true; station.visited = true; nextStationIndex++; setOverrideMessage(`✅ 停靠 ${station.name} +20分`, 3000); updateSignalLights(station, 'none'); station.stopPhase = 'none'; station.stopStartTime = 0; lastStopX = trainPositionX; stopCooldownActive = true; speedLimitState.timer = 0; speedLimitState.penalized = false; speedLimitState.graceActive = false; } else if (station.stopPhase !== 'green' && station.stopPhase !== 'none' && !station.hasAwarded) { score -= 20; station.hasAwarded = true; station.visited = true; nextStationIndex++; setOverrideMessage(`⚠️ 闯红灯！${station.name} -20分`, 3000); updateSignalLights(station, 'none'); station.stopPhase = 'none'; station.stopStartTime = 0; lastStopX = trainPositionX; stopCooldownActive = true; speedLimitState.timer = 0; speedLimitState.penalized = false; speedLimitState.graceActive = false; } } }
+        function handleNonStationStop() { if (isPaused) return; const station = getCurrentTargetStation(); const onPlatform = station ? isOnPlatform(trainPositionX) : false; const isStopped = speedKmh < STOP_THRESHOLD; if (isStopped && !onPlatform) { const cooldownPassed = (lastStopX === null || Math.abs(trainPositionX - lastStopX) > STOP_COOLDOWN_DIST || !stopCooldownActive); if (cooldownPassed) { score -= 20; stopCooldownActive = true; lastStopX = trainPositionX; setOverrideMessage('⚠️ 非站台停车 -20分', 2500); } } if (speedKmh > STOP_THRESHOLD && stopCooldownActive && Math.abs(trainPositionX - (lastStopX || 0)) > STOP_COOLDOWN_DIST) { stopCooldownActive = false; } }
+        function handleSkipStation() { if (isPaused) return; const station = getCurrentTargetStation(); if (!station) return; if (trainPositionX > station.worldX + station.platformHalf && !station.visited) { station.visited = true; station.hasAwarded = true; nextStationIndex++; updateSignalLights(station, 'none'); station.stopPhase = 'none'; speedLimitState.timer = 0; speedLimitState.penalized = false; speedLimitState.graceActive = false; if (station.allowSkip) { score += 5; setOverrideMessage(`🚂 跨站通过 ${station.name}（可跨站） +5分`, 3000); } else { score -= 20; setOverrideMessage(`⚠️ 跨站 ${station.name}（必须停靠）-20分`, 3000); } } }
+        function animate() { requestAnimationFrame(animate); const dt = Math.min(clock.getDelta(), 0.18); if (!isPaused && dt > 0) { elapsedSimTime += dt; gameTime += dt; if (brakePosition > 0.02) { const brakeDecel = brakePosition * MAX_BRAKE_DECEL; speedKmh = Math.max(0, speedKmh - brakeDecel * dt); if (speedKmh < 0.5) speedKmh = 0; targetSpeedKmh = 0; if (activeLever !== 'throttle') { throttlePosition = 0; updateLeverUI('throttle'); } } else if (activeLever !== 'throttle') { targetSpeedKmh = throttlePosition * maxSpeedKmh; } if (brakePosition < 0.02) { const diff = targetSpeedKmh - speedKmh; const acc = getMaxAccel(speedKmh, diff > 0); speedKmh += Math.abs(diff) < acc * dt ? diff : Math.sign(diff) * acc * dt; } trainPositionX += (speedKmh / 3.6) * dt; totalDistanceKm += (speedKmh / 3600) * dt; updateAITrain(dt); if (currentWeather === 'rainy') { rainParticles.position.copy(camera.position); rainParticles.position.y -= 5; } updateAutoWeather(); } if (activeLever !== 'throttle' && brakePosition < 0.02 && !isPaused) { const syncedPos = targetSpeedKmh / maxSpeedKmh; if (Math.abs(throttlePosition - syncedPos) > 0.005) { throttlePosition = syncedPos; updateLeverUI('throttle'); } } if (speedKmh > 380) speedIndicator.className = 'danger'; else if (speedKmh > 330) speedIndicator.className = 'warning'; else speedIndicator.className = ''; camera.position.x = trainPositionX; camera.position.y = 2.95; camera.position.z = TRACK_Z_UP; updateCameraLook(); if (Math.abs(trainPositionX - lastChunkUpdateX) > 28) { updateChunks(trainPositionX); distantMountains.position.x = trainPositionX; lastChunkUpdateX = trainPositionX; } updateSunPosition(); handleStationStop(); handleNonStationStop(); handleSkipStation(); handleSpeedLimit(dt); speedDisplay.textContent = Math.round(speedKmh); distanceDisplay.textContent = totalDistanceKm.toFixed(1); scoreDisplay.textContent = score; drawGauge(speedKmh); const nextStation = getCurrentTargetStation(); if (overrideMessage) { infoTip.textContent = overrideMessage; infoTip.classList.add('station-near'); infoTip.classList.remove('skip-allowed', 'must-stop'); } else if (nextStation) { const dist = Math.round(nextStation.worldX - trainPositionX); const skipInfo = nextStation.allowSkip ? ' 🟢必跨站' : ' 🔴必停'; infoTip.textContent = `📍 下一站：${nextStation.name}  ${dist > 0 ? dist : 0}m${skipInfo}`; infoTip.classList.add('station-near'); if (nextStation.allowSkip) { infoTip.classList.add('skip-allowed'); infoTip.classList.remove('must-stop'); } else { infoTip.classList.add('must-stop'); infoTip.classList.remove('skip-allowed'); } } else { infoTip.textContent = '🏁 终点站'; infoTip.classList.remove('station-near', 'skip-allowed', 'must-stop'); } if (speedKmh > 360) scene.fog.far = 620; else if (speedKmh > 260) scene.fog.far = 750; else scene.fog.far = 880; renderer.render(scene, camera); }
+        let isDragging = false, prevMouseX = 0, prevMouseY = 0;
+        function updateCameraLook() { if (!isDragging && !activeLever) { cameraYaw += (-defaultYaw - cameraYaw) * 0.035; cameraPitch += (defaultPitch - cameraPitch) * 0.035; } cameraYaw = THREE.MathUtils.clamp(cameraYaw, -maxYaw, maxYaw); cameraPitch = THREE.MathUtils.clamp(cameraPitch, minPitch, maxPitch); const lookDir = new THREE.Vector3(1, 0, 0); lookDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), cameraYaw); lookDir.applyAxisAngle(new THREE.Vector3(0, 0, 1), cameraPitch); lookDir.normalize(); camera.lookAt(camera.position.x + lookDir.x * 60, camera.position.y + lookDir.y * 60, camera.position.z + lookDir.z * 60); }
+        const canvas = renderer.domElement;
+        canvas.addEventListener('mousedown', (e) => { if (activeLever) return; if (e.button === 0 || e.button === 2) { isDragging = true; prevMouseX = e.clientX; prevMouseY = e.clientY; document.body.classList.add('grabbing'); } });
+        window.addEventListener('mousemove', (e) => { if (activeLever) return; if (!isDragging) return; const dx = e.clientX - prevMouseX, dy = e.clientY - prevMouseY; const s = 0.0028; cameraYaw -= dx * s; cameraPitch -= dy * s; prevMouseX = e.clientX; prevMouseY = e.clientY; });
+        window.addEventListener('mouseup', () => { if (activeLever) return; if (isDragging) { isDragging = false; document.body.classList.remove('grabbing'); } });
+        canvas.addEventListener('touchstart', (e) => { if (activeLever) return; if (e.touches.length === 1) { isDragging = true; prevMouseX = e.touches[0].clientX; prevMouseY = e.touches[0].clientY; document.body.classList.add('grabbing'); } }, { passive: false });
+        window.addEventListener('touchmove', (e) => { if (activeLever) return; if (!isDragging || e.touches.length !== 1) return; const dx = e.touches[0].clientX - prevMouseX, dy = e.touches[0].clientY - prevMouseY; const s = 0.0028; cameraYaw -= dx * s; cameraPitch -= dy * s; prevMouseX = e.touches[0].clientX; prevMouseY = e.touches[0].clientY; }, { passive: false });
+        window.addEventListener('touchend', () => { if (activeLever) return; if (isDragging) { isDragging = false; document.body.classList.remove('grabbing'); } });
+        window.addEventListener('keydown', (e) => { if (e.key === '1') setWeather('sunny'); if (e.key === '2') setWeather('cloudy'); if (e.key === '3') setWeather('rainy'); if (e.key === '4') setWeather('night'); if (e.code === 'Space') { e.preventDefault(); isPaused = !isPaused; } if (e.code === 'KeyW') { targetSpeedKmh = Math.min(maxSpeedKmh, targetSpeedKmh + 12); if (activeLever !== 'throttle') { throttlePosition = targetSpeedKmh / maxSpeedKmh; updateLeverUI('throttle'); } } if (e.code === 'KeyS') { targetSpeedKmh = Math.max(minSpeedKmh, targetSpeedKmh - 12); if (activeLever !== 'throttle') { throttlePosition = targetSpeedKmh / maxSpeedKmh; updateLeverUI('throttle'); } } if (e.code === 'KeyR') { cameraYaw = defaultYaw; cameraPitch = defaultPitch; } if (e.code === 'ArrowUp') { targetSpeedKmh = Math.min(maxSpeedKmh, targetSpeedKmh + 5); if (activeLever !== 'throttle') { throttlePosition = targetSpeedKmh / maxSpeedKmh; updateLeverUI('throttle'); } } if (e.code === 'ArrowDown') { targetSpeedKmh = Math.max(minSpeedKmh, targetSpeedKmh - 5); if (activeLever !== 'throttle') { throttlePosition = targetSpeedKmh / maxSpeedKmh; updateLeverUI('throttle'); } } });
+        window.addEventListener('wheel', (e) => { if (activeLever) return; e.preventDefault(); targetSpeedKmh = THREE.MathUtils.clamp(targetSpeedKmh + (e.deltaY > 0 ? -6 : 6), minSpeedKmh, maxSpeedKmh); if (activeLever !== 'throttle') { throttlePosition = targetSpeedKmh / maxSpeedKmh; updateLeverUI('throttle'); } }, { passive: false });
+        window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); updateLeverUI('both'); });
+        function updateSunPosition() { sunLight.position.x = trainPositionX + 140; sunLight.position.y = 80; sunLight.position.z = 48; sunLight.target.position.copy(camera.position); sunLight.target.position.x += 35; sunLight.target.updateMatrixWorld(); }
+        const clock = new THREE.Clock(); let lastChunkUpdateX = trainPositionX;
+        const speedIndicator = document.getElementById('speed-indicator'); const speedDisplay = document.getElementById('speed-display'); const distanceDisplay = document.getElementById('distance-display'); const scoreDisplay = document.getElementById('score-display'); const infoTip = document.getElementById('info-tip'); const speedLimitDisplay = document.getElementById('speed-limit-display');
+        let overrideMessage = null, elapsedSimTime = 0;
+        updateChunks(trainPositionX); lastChunkUpdateX = trainPositionX; updateSunPosition(); distantMountains.position.x = trainPositionX;
+        spawnAITrain();
+        requestAnimationFrame(animate);
+        console.log('🚄 wu8的中国火车模拟器（WCTS）已启动 - 大楼3倍/ AI精准停靠');
+    </script>
+</body>
+</html>
